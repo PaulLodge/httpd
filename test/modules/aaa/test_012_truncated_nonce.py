@@ -25,7 +25,6 @@ class TestDigestTruncatedNonce:
         start_pos = env.httpd_error_log.current_pos()
         r2 = env.curl_get(url, options=['-H', f'Authorization: {auth_header}'])
         assert r2.response["status"] == 401
-
         env.httpd_error_log.ignore_recent(lognos=["AH01782"])
 
     def test_digest_012_02_time_not_base64(self, env):
