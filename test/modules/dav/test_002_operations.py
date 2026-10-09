@@ -69,19 +69,26 @@ class TestDavOperations:
                 '<D:owner><D:href>test-owner</D:href></D:owner>'
                 '</D:lockinfo>')
 
+    def _check_response(self, r, expected, msg=""):
+        assert r.response is not None, \
+            f"No HTTP response (curl exit_code={r.exit_code}, " \
+            f"stderr={r.stderr}): {msg}"
+        assert r.response["status"] == expected, \
+            f"Expected {expected}, got {r.response['status']}: {msg}"
+
     # HEAD request on a DAV resource returns 200
     def test_dav_002_01(self, env):
         self._write_dav_file(env, 'hello.txt', 'hello')
         url = self._dav_url(env, 'hello.txt')
         r = env.curl_raw(url, options=['-I'])
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "HEAD hello.txt")
 
     # GET retrieves the correct file content
     def test_dav_002_02(self, env):
         self._write_dav_file(env, 'hello.txt', 'hello')
         url = self._dav_url(env, 'hello.txt')
         r = env.curl_raw(url)
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "GET hello.txt")
         assert r.stdout.strip() == 'hello'
 
     # PUT uploads content, subsequent GET returns the same content
@@ -91,10 +98,10 @@ class TestDavOperations:
         fpath = self._write_temp(env, 'put_content.txt', content)
         url = self._dav_url(env, 'put_test.txt')
         r = env.curl_raw(url, options=['-T', fpath])
-        assert r.response["status"] == 201
+        self._check_response(r, 201, "PUT put_test.txt")
         # verify with GET
         r = env.curl_raw(url)
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "GET put_test.txt")
         assert r.stdout.strip() == content
 
     # COPY duplicates a file; the copy has the original content
@@ -106,10 +113,10 @@ class TestDavOperations:
         r = env.curl_raw(src_url, options=[
             '-X', 'COPY',
             '-H', f'Destination: {dest_url}'])
-        assert r.response["status"] == 201
+        self._check_response(r, 201, "COPY hello.txt")
         # verify the copy has the original content
         r = env.curl_raw(dest_url)
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "GET hello_copy.txt")
         assert r.stdout.strip() == 'hello'
 
     # MOVE transfers a file; the source returns 404 afterwards
@@ -121,13 +128,13 @@ class TestDavOperations:
         r = env.curl_raw(src_url, options=[
             '-X', 'MOVE',
             '-H', f'Destination: {dest_url}'])
-        assert r.response["status"] == 201
+        self._check_response(r, 201, "MOVE move_src.txt")
         # source should be gone
         r = env.curl_raw(src_url)
-        assert r.response["status"] == 404
+        self._check_response(r, 404, "GET move_src.txt after MOVE")
         # destination should have the content
         r = env.curl_raw(dest_url)
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "GET move_dest.txt")
         assert r.stdout.strip() == 'move me'
 
     # DELETE removes a file; subsequent GET returns 404
@@ -135,10 +142,10 @@ class TestDavOperations:
         self._write_dav_file(env, 'delete_me.txt', 'delete this')
         url = self._dav_url(env, 'delete_me.txt')
         r = env.curl_raw(url, options=['-X', 'DELETE'])
-        assert r.response["status"] == 204
+        self._check_response(r, 204, "DELETE delete_me.txt")
         # verify the file is gone
         r = env.curl_raw(url)
-        assert r.response["status"] == 404
+        self._check_response(r, 404, "GET delete_me.txt after DELETE")
 
     # PROPFIND with Depth:1 returns a listing that includes file names
     def test_dav_002_07(self, env):
@@ -147,7 +154,7 @@ class TestDavOperations:
         r = env.curl_raw(url, options=[
             '-X', 'PROPFIND',
             '-H', 'Depth: 1'])
-        assert r.response["status"] == 207
+        self._check_response(r, 207, "PROPFIND Depth:1")
         assert 'hello.txt' in r.stdout
 
     # MKCOL creates a collection; PROPFIND on the parent shows it
@@ -156,13 +163,13 @@ class TestDavOperations:
         shutil.rmtree(col_dir, ignore_errors=True)
         url = self._dav_url(env, 'newcol')
         r = env.curl_raw(url, options=['-X', 'MKCOL'])
-        assert r.response["status"] == 201
+        self._check_response(r, 201, "MKCOL newcol")
         # verify the collection appears in the parent listing
         parent_url = self._dav_url(env)
         r = env.curl_raw(parent_url, options=[
             '-X', 'PROPFIND',
             '-H', 'Depth: 1'])
-        assert r.response["status"] == 207
+        self._check_response(r, 207, "PROPFIND after MKCOL")
         assert 'newcol' in r.stdout
 
     # After LOCK, PUT/DELETE/MOVE fail with 423 Locked but GET still works
@@ -174,23 +181,23 @@ class TestDavOperations:
             '-X', 'LOCK',
             '-H', 'Content-Type: text/xml',
             '--data-binary', f'@{fpath}'])
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "LOCK lock_test.txt")
         # PUT should fail with 423
         put_fpath = self._write_temp(env, 'put_locked.txt', 'overwrite attempt')
         r = env.curl_raw(url, options=['-T', put_fpath])
-        assert r.response["status"] == 423
+        self._check_response(r, 423, "PUT on locked resource")
         # DELETE should fail with 423
         r = env.curl_raw(url, options=['-X', 'DELETE'])
-        assert r.response["status"] == 423
+        self._check_response(r, 423, "DELETE on locked resource")
         # MOVE should fail with 423
         move_dest = self._dav_url(env, 'lock_moved.txt')
         r = env.curl_raw(url, options=[
             '-X', 'MOVE',
             '-H', f'Destination: {move_dest}'])
-        assert r.response["status"] == 423
+        self._check_response(r, 423, "MOVE on locked resource")
         # GET should still succeed on a write-locked resource
         r = env.curl_raw(url)
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "GET on locked resource")
         assert r.stdout.strip() == 'lock me'
         env.httpd_error_log.ignore_recent(
             matches=[r'.*dav:error.*'])
@@ -204,14 +211,14 @@ class TestDavOperations:
             '-X', 'LOCK',
             '-H', 'Content-Type: text/xml',
             '--data-binary', f'@{fpath}'])
-        assert r.response["status"] == 200
+        self._check_response(r, 200, "LOCK unlock_test.txt")
         # extract the lock token from the response header
         lock_token = r.response["header"]["lock-token"]
         # unlock the resource
         r = env.curl_raw(url, options=[
             '-X', 'UNLOCK',
             '-H', f'Lock-Token: {lock_token}'])
-        assert r.response["status"] == 204
+        self._check_response(r, 204, "UNLOCK unlock_test.txt")
         # DELETE should now succeed
         r = env.curl_raw(url, options=['-X', 'DELETE'])
-        assert r.response["status"] == 204
+        self._check_response(r, 204, "DELETE after UNLOCK")
