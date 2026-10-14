@@ -12,7 +12,8 @@ class CoreTestSetup(HttpdTestSetup):
     def __init__(self, env: 'HttpdTestEnv'):
         super().__init__(env=env)
         self.add_source_dir(os.path.dirname(inspect.getfile(CoreTestSetup)))
-        self.add_modules(["cgid","include","userdir","suexec","headers"])
+        self.add_modules(["cgid","include","userdir","suexec","headers",
+                          "reqtimeout"])
 
 
 class CoreTestEnv(HttpdTestEnv):
